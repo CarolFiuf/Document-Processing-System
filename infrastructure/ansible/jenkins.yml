@@ -1,0 +1,155 @@
+---
+- name: Deploy Jenkins
+  hosts: localhost
+  gather_facts: false
+  
+  vars:
+    region: ap-southeast-1
+    project_name: ml-platform
+    environment: "{{ env | default('dev') }}"
+    instance_type: t3.large
+    volume_size: 50
+    
+  tasks:
+    - name: Create security group
+      amazon.aws.ec2_security_group:
+        name: "{{ project_name }}-jenkins-{{ environment }}"
+        description: Security group for Jenkins
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ region }}"
+        rules:
+          - proto: tcp
+            ports: [22]
+            cidr_ip: "{{ admin_cidr }}"
+          - proto: tcp
+            ports: [8080]
+            cidr_ip: "{{ admin_cidr }}"
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+      register: jenkins_sg
+
+    - name: Launch Jenkins instance
+      amazon.aws.ec2_instance:
+        name: "{{ project_name }}-jenkins-{{ environment }}"
+        instance_type: "{{ instance_type }}"
+        image_id: ami-0df7a207adb9748c7  # Amazon Linux 2023
+        region: "{{ region }}"
+        security_group: "{{ jenkins_sg.group_id }}"
+        vpc_subnet_id: "{{ public_subnet_id }}"
+        key_name: "{{ key_name }}"
+        network:
+          assign_public_ip: true
+        volumes:
+          - device_name: /dev/xvda
+            ebs:
+              volume_size: "{{ volume_size }}"
+              volume_type: gp3
+        tags:
+          Name: "{{ project_name }}-jenkins-{{ environment }}"
+          Environment: "{{ environment }}"
+      register: jenkins_instance
+
+    - name: Wait for instance to be running
+      amazon.aws.ec2_instance_info:
+        instance_ids:
+          - "{{ jenkins_instance.instance_ids[0] }}"
+        region: "{{ region }}"
+      register: instance_info
+      until: instance_info.instances[0].state.name == 'running'
+      retries: 30
+      delay: 10
+
+    - name: Add instance to inventory
+      add_host:
+        name: jenkins
+        ansible_host: "{{ jenkins_instance.instances[0].public_ip_address }}"
+        ansible_user: ec2-user
+        ansible_ssh_private_key_file: "{{ ssh_key_file }}"
+        groups: jenkins
+
+    - name: Wait for SSH to come up
+      wait_for:
+        host: "{{ jenkins_instance.instances[0].public_ip_address }}"
+        port: 22
+        delay: 10
+        timeout: 300
+      delegate_to: localhost
+
+- name: Configure Jenkins
+  hosts: jenkins
+  become: yes
+  
+  tasks:
+    - name: Update system packages
+      yum:
+        name: '*'
+        state: latest
+        update_only: yes
+
+    - name: Install required packages
+      yum:
+        name:
+          - java-11-amazon-corretto
+          - git
+          - docker
+        state: present
+
+    - name: Start Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add Jenkins repository
+      get_url:
+        url: https://pkg.jenkins.io/redhat-stable/jenkins.repo
+        dest: /etc/yum.repos.d/jenkins.repo
+
+    - name: Import Jenkins key
+      rpm_key:
+        key: https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+        state: present
+
+    - name: Install Jenkins
+      yum:
+        name: jenkins
+        state: present
+
+    - name: Create Jenkins directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: jenkins
+        group: jenkins
+        mode: '0755'
+      loop:
+        - /var/lib/jenkins
+        - /var/lib/jenkins/plugins
+
+    - name: Start Jenkins service
+      systemd:
+        name: jenkins
+        state: started
+        enabled: yes
+
+    - name: Wait for Jenkins to start
+      wait_for:
+        port: 8080
+        delay: 10
+        timeout: 300
+
+    - name: Get initial admin password
+      command: cat /var/lib/jenkins/secrets/initialAdminPassword
+      register: jenkins_admin_password
+      changed_when: false
+
+    - name: Show Jenkins password
+      debug:
+        var: jenkins_admin_password.stdout
+        
+    - name: Add ec2-user to docker group
+      user:
+        name: ec2-user
+        groups: docker
+        append: yes

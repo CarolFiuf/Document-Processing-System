@@ -1,0 +1,6 @@
+
+
+detector:
+  model: "yolo12n.pt"
+  confidence: 0.5
+  vehicle_classes: [1, 2, 3, 5, 7]

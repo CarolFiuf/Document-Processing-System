@@ -1,0 +1,108 @@
+---
+- name: Deploy Compute Instance
+  hosts: localhost
+  gather_facts: false
+  
+  vars:
+    region: ap-southeast-1
+    project_name: ml-platform
+    environment: "{{ env | default('dev') }}"
+    instance_type: t3.xlarge
+    volume_size: 100
+    
+  tasks:
+    - name: Create security group
+      amazon.aws.ec2_security_group:
+        name: "{{ project_name }}-compute-{{ environment }}"
+        description: Security group for compute instance
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ region }}"
+        rules:
+          - proto: tcp
+            ports: [22]
+            cidr_ip: "{{ vpc_cidr }}"
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+      register: compute_sg
+
+    - name: Launch compute instance
+      amazon.aws.ec2_instance:
+        name: "{{ project_name }}-compute-{{ environment }}"
+        instance_type: "{{ instance_type }}"
+        image_id: ami-0df7a207adb9748c7  # Amazon Linux 2023
+        region: "{{ region }}"
+        security_group: "{{ compute_sg.group_id }}"
+        vpc_subnet_id: "{{ private_subnet_id }}"
+        key_name: "{{ key_name }}"
+        volumes:
+          - device_name: /dev/xvda
+            ebs:
+              volume_size: "{{ volume_size }}"
+              volume_type: gp3
+        tags:
+          Name: "{{ project_name }}-compute-{{ environment }}"
+          Environment: "{{ environment }}"
+      register: compute_instance
+
+    - name: Wait for instance to be running
+      amazon.aws.ec2_instance_info:
+        instance_ids:
+          - "{{ compute_instance.instance_ids[0] }}"
+        region: "{{ region }}"
+      register: instance_info
+      until: instance_info.instances[0].state.name == 'running'
+      retries: 30
+      delay: 10
+
+    - name: Add instance to inventory
+      add_host:
+        name: compute
+        ansible_host: "{{ compute_instance.instances[0].private_ip_address }}"
+        ansible_user: ec2-user
+        ansible_ssh_private_key_file: "{{ ssh_key_file }}"
+        groups: compute
+
+- name: Configure Compute Instance
+  hosts: compute
+  become: yes
+  
+  tasks:
+    - name: Update system packages
+      yum:
+        name: '*'
+        state: latest
+        update_only: yes
+
+    - name: Install development tools
+      yum:
+        name:
+          - git
+          - docker
+          - python3-pip
+          - python3-devel
+          - gcc
+          - make
+          - wget
+        state: present
+
+    - name: Start Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add ec2-user to docker group
+      user:
+        name: ec2-user
+        groups: docker
+        append: yes
+
+    - name: Install Python packages
+      pip:
+        name:
+          - boto3
+          - docker-compose
+          - pytest
+          - flake8
+        state: present
