@@ -1,6 +1,22 @@
 
+# Traffic Monitoring System Configuration
+# Note: Some values can be overridden by environment variables
 
 detector:
-  model: "yolo12n.pt"
-  confidence: 0.5
-  vehicle_classes: [1, 2, 3, 5, 7]
+  model: "${YOLO_MODEL:-yolo11n.pt}"
+  confidence: ${YOLO_CONFIDENCE:-0.5}
+  vehicle_classes: ${VEHICLE_CLASSES:-[1, 2, 3, 5, 7]}
+
+video:
+  # Video processing settings
+  fps: 30
+  buffer_size: 10
+
+tracking:
+  # Object tracking settings
+  max_disappeared: 30
+  max_distance: 50
+
+logging:
+  level: "${LOG_LEVEL:-INFO}"
+  file: "${LOG_FILE:-./data/logs/traffic.log}"
