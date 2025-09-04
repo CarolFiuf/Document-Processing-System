@@ -11,7 +11,7 @@ services:
     env_file:
       - ../.env
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-docprocessing}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-123456}@postgres:5432/${POSTGRES_DB:-docprocessing}
       - REDIS_URL=redis://redis:6379
       - LLM_API_BASE=http://host.docker.internal:8001/v1
       - MILVUS_HOST=milvus
@@ -55,7 +55,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-docprocessing}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
     ports:
       - "5432:5432"

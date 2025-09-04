@@ -9,6 +9,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 from fastapi import UploadFile
 from datetime import datetime
+from typing import List, Dict, Any
 
 from app.models.database import Document
 from app.processors.ocr_processor import OCRProcessor
@@ -44,11 +45,9 @@ class DocumentService:
             await save_uploaded_file(file, file_path)
             file_size = os.path.getsize(file_path)
             
-            # Auto-detect document type if not provided
+            # Auto-detect document type if not provided (defer to background processing)
             if not document_type:
-                # Quick text extraction for type detection
-                quick_ocr = await self.ocr_processor.extract_text(file_path)
-                document_type = self.llm_processor._detect_document_type(quick_ocr.get('text', ''))
+                document_type = "other"  # Default type, will be detected during background processing
             
             # Create database record
             document = Document(
@@ -103,6 +102,14 @@ class DocumentService:
             logger.info(f"Step 1: OCR extraction from {document.file_path}")
             ocr_result = await self.ocr_processor.extract_text(document.file_path)
             extracted_text = ocr_result.get('text', '')
+            
+            # Step 1.5: Detect document type if not already determined
+            if document.document_type == "other":
+                logger.info(f"Step 1.5: Detecting document type")
+                detected_type = self.llm_processor._detect_document_type(extracted_text)
+                document.document_type = detected_type
+                db.commit()
+                logger.info(f"Document type detected: {detected_type}")
             
             # Step 2: LLM Analysis (NEW!)
             logger.info(f"Step 2: LLM analysis")
@@ -268,3 +275,29 @@ class DocumentService:
             recommendations.append("Document quality could be improved for better analysis")
         
         return recommendations
+    
+    async def process_document_background(self, doc_id: str):
+        """Background task to process document with OCR and LLM analysis"""
+        from app.database.session import get_db
+        
+        # Get database session
+        db = next(get_db())
+        
+        try:
+            # Get document
+            document = db.query(Document).filter(Document.id == doc_id).first()
+            if not document:
+                logger.error(f"Document {doc_id} not found for background processing")
+                return
+            
+            logger.info(f"Starting background processing for document {doc_id}")
+            
+            # Process the document
+            await self.process_document(doc_id, db)
+            
+            logger.info(f"Background processing completed for document {doc_id}")
+            
+        except Exception as e:
+            logger.error(f"Error in background processing for document {doc_id}: {e}")
+        finally:
+            db.close()

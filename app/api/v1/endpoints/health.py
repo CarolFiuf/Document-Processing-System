@@ -27,7 +27,8 @@ async def detailed_health_check():
     # Database check
     try:
         with engine.connect() as connection:
-            connection.execute("SELECT 1")
+            from sqlalchemy import text
+            connection.execute(text("SELECT 1"))
         health_status["checks"]["database"] = "healthy"
     except Exception as e:
         logger.error(f"Database health check failed: {e}")

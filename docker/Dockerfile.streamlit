@@ -10,9 +10,9 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install streamlit dependencies
+# Copy requirements and install all dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir streamlit requests
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy UI code
 COPY ui/ ./ui/
